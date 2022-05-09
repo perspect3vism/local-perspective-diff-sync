@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 
 pub mod search;
 pub mod methods;
+pub mod utils;
 
 lazy_static! {
     pub static ref CHAIN: Mutex<BTreeMap<String, PerspectiveDiffEntry>> = Mutex::new(BTreeMap::new());
@@ -40,7 +41,7 @@ pub struct PerspectiveDiff {
     pub removals: Vec<LinkExpression>
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Hash, Clone)]
 pub struct PerspectiveDiffEntry {
     pub parents: Vec<String>,
     pub diff: PerspectiveDiff,

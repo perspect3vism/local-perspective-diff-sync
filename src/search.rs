@@ -1,7 +1,5 @@
-use crate::*;
-
 use std::collections::HashMap;
-use petgraph::{graph::{UnGraph, DiGraph, Graph, NodeIndex}, algo::{all_simple_paths, dominators::simple_fast, astar, k_shortest_path}};
+use petgraph::{graph::{UnGraph, DiGraph, Graph, NodeIndex}, algo::{all_simple_paths, dominators::simple_fast}};
 use petgraph::dot::{Dot, Config};
 
 pub struct Search {
@@ -33,8 +31,8 @@ impl Search {
         index
     }
 
-    pub fn get_node_index(&self, node: String) -> Option<&NodeIndex<u32>> {
-        self.node_index_map.get(&node)
+    pub fn get_node_index(&self, node: &String) -> Option<&NodeIndex<u32>> {
+        self.node_index_map.get(node)
     }
 
     pub fn print(&self) {
@@ -74,7 +72,7 @@ fn ancestor_search_test() {
 
     //Fork branch one; depth two
     let open_fork = search.add_node(Some(vec![merge_entry]), String::from("hash6"));
-    let open_fork_2 = search.add_node(Some(vec![open_fork]), String::from("hash7"));
+    let _open_fork_2 = search.add_node(Some(vec![open_fork]), String::from("hash7"));
 
     //Fork branch two; depth one
     let open_fork_3 = search.add_node(Some(vec![merge_entry]), String::from("hash8"));

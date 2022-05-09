@@ -1,8 +1,8 @@
-use petgraph::graph::NodeIndex;
-use sha2::{Sha256, Digest};
-use base64ct::{Base64, Encoding};
+use std::ops::Index;
 
-use crate::{CHAIN, search, PerspectiveDiff, PerspectiveDiffEntry};
+use petgraph::graph::NodeIndex;
+
+use crate::{CHAIN, PerspectiveDiff, PerspectiveDiffEntry, utils::{populate_search, generate_diff_hash}};
 
 //Represents the latest revision as seen by the DHT
 pub fn latest_revision() -> String {
@@ -26,23 +26,10 @@ pub fn pull() -> PerspectiveDiff {
     //Latest DHT state is not equal to users local state; we are not sync'd
     if latest != current {
         //Start search
-        let mut search = search::Search::new();
-        //Populate search graph with all items from local CHAIN; will be replaced with chunked holochain DHT calls
-        //Where we look up the chain at chunk size of N and keep making search operations on received state at each iteration
-        for diff in CHAIN.lock().expect("Could not get lock").iter() {
-            let persp_diff = diff.1;
-            if persp_diff.parents.len() > 0 {
-                let parents = persp_diff.parents.clone().into_iter()
-                    .map(|hash| search.get_node_index(hash).unwrap().clone())
-                    .collect::<Vec<NodeIndex>>();
-                search.add_node(Some(parents), diff.0.clone());
-            } else {
-                search.add_node(None, diff.0.clone());
-            }
-        }
+        let search = populate_search();
         //Get index for current and latest indexes
-        let current_index = search.get_node_index(current).expect("Could not find value in map").clone();
-        let latest_index = search.get_node_index(latest).expect("Could not find value in map").clone();
+        let current_index = search.get_node_index(&current).expect("Could not find value in map").clone();
+        let latest_index = search.get_node_index(&latest).expect("Could not find value in map").clone();
 
         //Check if latest diff is a child of current diff
         let ancestor_status = search.get_paths(latest_index.clone(), current_index.clone());
@@ -53,28 +40,74 @@ pub fn pull() -> PerspectiveDiff {
             //Get all diffs between is_ancestor latest and current_revision
             //ancestor status contains all paths between latest and current revision, this can be used to get all the diffs when all paths are dedup'd together
             //Then update current revision to latest revision
-
-            PerspectiveDiff {
+            let mut diffs: Vec<NodeIndex> = ancestor_status.into_iter().flatten().collect();
+            diffs.dedup();
+            let mut out = PerspectiveDiff {
                 additions: vec![],
                 removals: vec![]
+            };
+            let mut chain = CHAIN.lock().expect("Could not get lock");
+
+            for diff in diffs {
+                //Remove from chain so we can get ownership
+                let current_diff = chain.remove(
+                    search.graph.index(diff)
+                );
+                if let Some(val) = current_diff {
+                    out.additions.append(&mut val.diff.additions.clone());
+                    out.removals.append(&mut val.diff.removals.clone());
+                    //Add value back to chain
+                    chain.insert(search.graph.index(diff).clone(), val);
+                }
             }
+            out
         } else {
             //There is a fork, find all the diffs from a fork and apply in merge with latest and current revisions as parents
             //Calculate the place where a common ancestor is shared between current and latest revisions
             //Common ancestor is then used as the starting point of gathering diffs on a fork
 
-            //let common_ancestor = search.find_common_ancestor(current_index, latest_index).expect("Could not find common ancestor");
-            //let paths = search.get_paths(latest_index.clone(), common_ancestor.clone());
-            //Use items in path to recurse from common_ancestor going in direction of fork
-            
-            //Create the merge entry
-            //search::add_node();
-            //CHAIN.insert()
+            let search = populate_search();
+            let common_ancestor = search.find_common_ancestor(current_index, latest_index).expect("Could not find common ancestor");
+            let paths = search.get_paths(latest_index.clone(), common_ancestor.clone());
+            let mut fork_direction: Option<Vec<NodeIndex>> = None;
 
-            PerspectiveDiff {
+            //Use items in path to recurse from common_ancestor going in direction of fork
+            for path in paths {
+                if path.contains(&current_index) {
+                    fork_direction = Some(path);
+                    break
+                };
+            }
+            let mut merge_entry = PerspectiveDiff {
                 additions: vec![],
                 removals: vec![]
+            };
+            let mut chain = CHAIN.lock().expect("Could not get lock");
+
+            if let Some(diffs) = fork_direction {    
+                for diff in diffs {
+                    //Remove from chain so we can get ownership
+                    let current_diff = chain.remove(
+                        search.graph.index(diff)
+                    );
+                    if let Some(val) = current_diff {
+                        merge_entry.additions.append(&mut val.diff.additions.clone());
+                        merge_entry.removals.append(&mut val.diff.removals.clone());
+                        //Add value back to chain
+                        chain.insert(search.graph.index(diff).clone(), val);
+                    }
+                }
             }
+
+            let hash = generate_diff_hash(&merge_entry);
+            
+            //Create the merge entry
+            chain.insert(hash, PerspectiveDiffEntry {
+                parents: vec![latest, current],
+                diff: merge_entry.clone()
+            });
+
+            merge_entry
         }
     } else {
         PerspectiveDiff {
@@ -89,13 +122,9 @@ pub fn render() {
 }
 
 pub fn commit(diff: PerspectiveDiff, inject_parent: Option<Vec<String>>) {
-    let diffs_before_snapshot = 10;
+    //let diffs_before_snapshot = 10;
     //Hash diff commit
-    let encoded_diff: Vec<u8> = bincode::serialize(&diff).unwrap();
-    let mut hasher = Sha256::new();
-    hasher.update(encoded_diff);
-    let hash = hasher.finalize();
-    let base64_hash = Base64::encode_string(&hash);
+    let base64_hash = generate_diff_hash(&diff);
 
     //Get last parent
     let parent = if inject_parent.is_none() {
