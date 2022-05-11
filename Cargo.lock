@@ -124,6 +124,7 @@ dependencies = [
  "base64ct",
  "bincode",
  "hex-literal",
+ "indexmap",
  "lazy_static",
  "petgraph",
  "serde",

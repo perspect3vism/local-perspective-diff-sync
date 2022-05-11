@@ -3,9 +3,9 @@ use petgraph::{graph::{UnGraph, DiGraph, Graph, NodeIndex}, algo::{all_simple_pa
 use petgraph::dot::{Dot, Config};
 
 pub struct Search {
-    pub graph: DiGraph<String, ()>,
-    pub undirected_graph: UnGraph<String, ()>,
-    pub node_index_map: HashMap<String, NodeIndex<u32>>
+    pub graph: DiGraph<usize, ()>,
+    pub undirected_graph: UnGraph<usize, ()>,
+    pub node_index_map: HashMap<usize, NodeIndex<u32>>
 }
 
 
@@ -18,7 +18,7 @@ impl Search {
         }
     }
 
-    pub fn add_node(&mut self, parents: Option<Vec<NodeIndex<u32>>>, diff: String) -> NodeIndex<u32> {
+    pub fn add_node(&mut self, parents: Option<Vec<NodeIndex<u32>>>, diff: usize) -> NodeIndex<u32> {
         let index = self.graph.add_node(diff.clone());
         self.undirected_graph.add_node(diff.clone());
         self.node_index_map.insert(diff, index);
@@ -31,7 +31,7 @@ impl Search {
         index
     }
 
-    pub fn get_node_index(&self, node: &String) -> Option<&NodeIndex<u32>> {
+    pub fn get_node_index(&self, node: &usize) -> Option<&NodeIndex<u32>> {
         self.node_index_map.get(node)
     }
 
@@ -57,12 +57,12 @@ impl Search {
 #[test]
 fn ancestor_search_test() {
     let mut search = Search::new();
-    let index = search.add_node(None, String::from("hash0"));
-    let child_index = search.add_node(Some(vec![index]), String::from("hash1"));
-    let fork_index = search.add_node(Some(vec![child_index]), String::from("hash2"));
-    let fork_second_index = search.add_node(Some(vec![child_index]), String::from("hash3"));
-    let fork_child = search.add_node(Some(vec![fork_index]), String::from("hash4"));
-    let merge_entry = search.add_node(Some(vec![fork_child, fork_second_index]), String::from("hash5"));
+    let index = search.add_node(None, 0);
+    let child_index = search.add_node(Some(vec![index]), 1);
+    let fork_index = search.add_node(Some(vec![child_index]), 2);
+    let fork_second_index = search.add_node(Some(vec![child_index]), 3);
+    let fork_child = search.add_node(Some(vec![fork_index]), 4);
+    let merge_entry = search.add_node(Some(vec![fork_child, fork_second_index]), 5);
     search.print();
     let is_ancestor = search.get_paths(merge_entry, child_index);
     assert_eq!(is_ancestor.len() > 0, true);
@@ -71,11 +71,11 @@ fn ancestor_search_test() {
     assert_eq!(is_ancestor.len() > 0, false);
 
     //Fork branch one; depth two
-    let open_fork = search.add_node(Some(vec![merge_entry]), String::from("hash6"));
-    let _open_fork_2 = search.add_node(Some(vec![open_fork]), String::from("hash7"));
+    let open_fork = search.add_node(Some(vec![merge_entry]), 6);
+    let _open_fork_2 = search.add_node(Some(vec![open_fork]), 7);
 
     //Fork branch two; depth one
-    let open_fork_3 = search.add_node(Some(vec![merge_entry]), String::from("hash8"));
+    let open_fork_3 = search.add_node(Some(vec![merge_entry]), 8);
     search.print();
 
     let common = search.find_common_ancestor(open_fork, open_fork_3);

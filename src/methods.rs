@@ -2,22 +2,19 @@ use std::ops::Index;
 
 use petgraph::graph::NodeIndex;
 
-use crate::{CHAIN, PerspectiveDiff, PerspectiveDiffEntry, utils::{populate_search, generate_diff_hash}};
+use crate::{CHAIN, INC, CURRENT_REVISION, PerspectiveDiff, PerspectiveDiffEntry, utils::populate_search};
 
 //Represents the latest revision as seen by the DHT
-pub fn latest_revision() -> String {
-    match CHAIN.lock().expect("Could not get lock on chain").last_entry() {
-        Some(diff_hash) => diff_hash.key().to_string(),
-        None => String::from("root")
+pub fn latest_revision() -> usize {
+    match CHAIN.lock().expect("Could not get lock on chain").last() {
+        Some(diff_hash) => diff_hash.0.clone(),
+        None => 0
     }
 }
 
 //Represents the current revision as seen by our local state
-pub fn current_revision() -> String {
-    match CHAIN.lock().expect("Could not get lock on chain").last_entry() {
-        Some(diff_hash) => diff_hash.key().to_string(),
-        None => String::from("root")
-    }
+pub fn current_revision() -> usize {
+    *CURRENT_REVISION.read().expect("Could not get lock on current revision")
 }
 
 pub fn pull() -> PerspectiveDiff {
@@ -42,6 +39,8 @@ pub fn pull() -> PerspectiveDiff {
             //Then update current revision to latest revision
             let mut diffs: Vec<NodeIndex> = ancestor_status.into_iter().flatten().collect();
             diffs.dedup();
+            diffs.reverse();
+            diffs.retain(|val| val != &current_index);
             let mut out = PerspectiveDiff {
                 additions: vec![],
                 removals: vec![]
@@ -60,6 +59,8 @@ pub fn pull() -> PerspectiveDiff {
                     chain.insert(search.graph.index(diff).clone(), val);
                 }
             }
+            println!("Setting current to: {:#?}", latest);
+            *CURRENT_REVISION.write().expect("Could not get lock on current revision") = latest;
             out
         } else {
             //There is a fork, find all the diffs from a fork and apply in merge with latest and current revisions as parents
@@ -68,7 +69,7 @@ pub fn pull() -> PerspectiveDiff {
 
             let search = populate_search();
             let common_ancestor = search.find_common_ancestor(current_index, latest_index).expect("Could not find common ancestor");
-            let paths = search.get_paths(latest_index.clone(), common_ancestor.clone());
+            let paths = search.get_paths(current_index.clone(), common_ancestor.clone());
             let mut fork_direction: Option<Vec<NodeIndex>> = None;
 
             //Use items in path to recurse from common_ancestor going in direction of fork
@@ -84,10 +85,12 @@ pub fn pull() -> PerspectiveDiff {
             };
             let mut chain = CHAIN.lock().expect("Could not get lock");
 
-            if let Some(diffs) = fork_direction {    
+            if let Some(mut diffs) = fork_direction {    
+                diffs.reverse();
+                diffs.retain(|val| val != &common_ancestor);
                 for diff in diffs {
                     //Remove from chain so we can get ownership
-                    let current_diff = chain.remove(
+                    let current_diff = chain.shift_remove(
                         search.graph.index(diff)
                     );
                     if let Some(val) = current_diff {
@@ -99,14 +102,17 @@ pub fn pull() -> PerspectiveDiff {
                 }
             }
 
-            let hash = generate_diff_hash(&merge_entry);
+            let mut key = INC.write().expect("Could not get read on INC");
+            *key += 1;
             
             //Create the merge entry
-            chain.insert(hash, PerspectiveDiffEntry {
+            chain.insert(key.clone(), PerspectiveDiffEntry {
                 parents: vec![latest, current],
                 diff: merge_entry.clone()
             });
+            *CURRENT_REVISION.write().expect("Could not get lock on current revision") = *key;
 
+            //TODO: actually return diff from remote fork, since we need to pull changes we dont know about
             merge_entry
         }
     } else {
@@ -118,13 +124,15 @@ pub fn pull() -> PerspectiveDiff {
 }
 
 pub fn render() {
-
+    let search = populate_search();
+    search.print();
 }
 
-pub fn commit(diff: PerspectiveDiff, inject_parent: Option<Vec<String>>) {
+pub fn commit(diff: PerspectiveDiff, inject_parent: Option<Vec<usize>>) -> usize {
     //let diffs_before_snapshot = 10;
     //Hash diff commit
-    let base64_hash = generate_diff_hash(&diff);
+    let mut key = INC.write().expect("Could not get read on INC");
+    *key += 1;
 
     //Get last parent
     let parent = if inject_parent.is_none() {
@@ -137,9 +145,7 @@ pub fn commit(diff: PerspectiveDiff, inject_parent: Option<Vec<String>>) {
         parents: parent,
         diff: diff
     };
-    CHAIN.lock().expect("Could not get lock on chain").insert(base64_hash, entry);
-}
-
-fn main() {
-    println!("Hello world")
+    CHAIN.lock().expect("Could not get lock on chain").insert(key.clone(), entry);
+    *CURRENT_REVISION.write().expect("Could not get read on current revision") = *key;
+    *key
 }

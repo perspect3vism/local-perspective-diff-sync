@@ -14,13 +14,15 @@ pub fn generate_diff_hash(diff: &PerspectiveDiff) -> String {
 
 pub fn populate_search() -> Search {
     let mut search = Search::new();
+    let chain = CHAIN.lock().expect("Could not get lock");
+    //println!("Chain: {:#?}", chain);
     //Populate search graph with all items from local CHAIN; will be replaced with chunked holochain DHT calls
     //Where we look up the chain at chunk size of N and keep making search operations on received state at each iteration
-    for diff in CHAIN.lock().expect("Could not get lock").iter() {
+    for diff in chain.iter() {
         let persp_diff = diff.1;
-        if persp_diff.parents.len() > 0 {
+        if persp_diff.parents.first().expect("Did not find parent for entry") != &0 {
             let parents = persp_diff.parents.clone().into_iter()
-                .map(|hash| search.get_node_index(&hash).unwrap().clone())
+                .map(|hash| search.get_node_index(&hash).expect("Could not find parent in search graph").clone())
                 .collect::<Vec<NodeIndex>>();
             search.add_node(Some(parents), diff.0.clone());
         } else {
